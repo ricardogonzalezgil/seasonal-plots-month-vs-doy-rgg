@@ -1,0 +1,267 @@
+---
+title: "Make your plots more intuitive: label by Month, not Day of year"
+author: "Ricardo González-Gil"
+date: "2025-05-13"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    toc_float: true
+  pdf_document:
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include = FALSE}
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+# This sets up the working directory to the RStudio project root,
+# rather than the directory where the notebook is located
+
+library(tidyverse)
+```
+
+## Introduction
+
+When plotting seasonal data, it's common to use **day of year (DOY)** as the variable on the x-axis. While this is convenient for analysis, it’s often not intuitive for readers. Most people don’t naturally think in terms of “day 241” or “day 151” — instead, we orient ourselves in time through **months and calendar dates**.
+
+Ask yourself: if I say something happened on day 234 of the year, can you immediately place that in your mental calendar? Probably not. We might guess it's sometime in late summer, but the exact timing remains unclear — both cognitively and visually.
+
+That’s why I believe we should make the extra effort, especially in data visualization, to **translate DOY into a more familiar format, such as month-based labels**. This improves clarity and makes plots more accessible to a wider audience — whether in scientific publications or more general communication.
+
+In this document, I present a simple and flexible approach to **replace day-of-year labels with month markers and separators**, making seasonal plots cleaner, easier to read, and more aligned with how we naturally perceive time.
+
+## The data
+
+As an example, I use **surface temperature** data from the **Scottish Coastal Observatory monitoring site at Stonehaven**, maintained by **Marine Scotland**. The data are available on the [Marine Scotland website](https://data.marine.gov.scot/dataset/scottish-coastal-observatory-stonehaven-site).
+
+The station is located in the northwestern North Sea (56°57.8′ N, 02°06.2′ W), approximately 5 km offshore, with a water column depth of 48 meters. It is part of a long-term coastal monitoring program.
+
+Specifically, I downloaded the dataset titled *"Scottish Coastal Observatory – Stonehaven Site – Environmental Data"*, which provides temperature records at approximately weekly resolution, spanning from 1997 to 2020.
+
+```{r data, results = "hide", cache = T}
+# Data import ####
+data_imp <- read_csv(
+  "./data/SCOBS_Stonehaven_Environmental_2021.csv",
+  show_col_types = FALSE
+)
+
+# Modification of original data ####
+## 1) Select relevant variables and rename for clarity  ####
+d_tmp <-
+  data_imp |>
+  select(D10_Day, D11_Month, D12_Year, D16_Depth, "D17_Temperature _oC") |>
+  rename(
+    d = D10_Day,
+    m = D11_Month,
+    y = D12_Year,
+    depth = D16_Depth,
+    tmp = "D17_Temperature _oC"
+  ) |>
+  mutate(date = lubridate::ymd(paste(y, m, d, sep = "-"))) |>
+  mutate(dy = lubridate::yday(date))
+
+## 2) Exploration of data and further modifications ####
+# Check depths where data were collected
+sort(unique(d_tmp$depth))
+
+# Filter to retain only surface temperature values (0–5 m) and compute daily
+# surface temperature averages in case several temperatures were recorded for
+# different surfaces depths for a particular date.
+
+d_tmp_sfc <-
+  d_tmp |>
+  mutate(sfc = ifelse(depth %in% 1:5, "sfc", "other")) |>
+  filter(sfc == "sfc") |>
+  filter(tmp > 0) |> # Filter out physically implausible temperature values (<<< 0).
+  group_by(date) |>
+  reframe(
+    tmp_me = ifelse(all(is.na(tmp)), NA, mean(tmp, na.rm = T)),
+    across(c(y, m, d, dy), first)
+  )
+```
+
+## The plots
+
+Before generating the figures, I define a custom `ggplot2` theme to ensure a consistent visual style and avoid repeating styling code across plots.
+
+```{r ggplot_theme_labels, cache = T}
+
+# Custom theme for consistent style
+my_th <-
+  theme_bw() +
+  theme(
+    axis.ticks = element_line(color = "black", linewidth = 0.3),
+    axis.ticks.length = unit(0.12, "cm"),
+    axis.title = element_text(color = "black", size = 14),
+    axis.text = element_text(color = "black", size = 12),
+    legend.text = element_text(color = "black", size = 10),
+    legend.title = element_text(color = "black", size = 12),
+    strip.text = element_text(color = "black", size = 11),
+    legend.key.size = unit(0.5, "cm"),
+    panel.border = element_rect(color = "black")
+  )
+```
+
+### Default plot: Day of year on the x-axis
+
+We begin with a basic plot using **day of year (DOY)** as the x-axis, with no additional formatting. I include a **Generalized Additive Model (GAM)** smoothing curve to highlight the main seasonal trend in surface temperature.
+
+```{r pl_day_year, fig.width = 5, fig.height = 4}
+
+d_tmp_sfc_dy <-
+  d_tmp_sfc |>
+  ggplot(aes(dy, tmp_me)) +
+  geom_point(
+    shape = 21,
+    color = "dodgerblue3",
+    fill = "dodgerblue3",
+    size = 1.7,
+    alpha = 0.6
+  ) +
+  stat_smooth(
+    method = "gam",
+    formula = y ~ s(x, bs = "cc", k = 10),
+    method.args = list(knots = list(x = c(0.5, 365.5))),
+    color = "black",
+    alpha = 0.5
+  ) +
+  scale_x_continuous(
+    name = "Day of year",
+    expand = c(0.001, 0.001),
+    breaks = seq(1, 334, by = 30),
+    limits = c(1, 365)
+  ) +
+  scale_y_continuous(
+    name = expression(Temperature[Sfc] ~ (degree * C)),
+    expand = c(0.01, 0.01)
+  ) +
+  my_th
+
+print(d_tmp_sfc_dy)
+
+# Save the plot
+ggsave(
+  d_tmp_sfc_dy,
+  file = paste("./figs/", "d_tmp_sfc_dy", ".png", sep = ""),
+  units = "cm",
+  width = 16,
+  height = 14,
+  dpi = 350
+)
+```
+
+### Enhanced plot: using Month labels instead of DOY
+
+To improve readability, I’ll now create an alternative version of the plot where 
+the x-axis uses **month labels** instead of numeric DOY values.
+
+#### Define DOY helpers for labeling
+
+First, I define helper variables to position:
+
+- **Vertical lines** at the end of each month.
+- **Single-letter month labels** at the midpoint of each month.
+
+```{r label_months}
+
+# Days per month (non-leap year)
+month_days <- c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+# 1. Day-of-year positions for separators (tick marks and vlines)
+month_ends <- cumsum(month_days)
+month_ends_position <- month_ends[-12]
+
+# 2. Day-of-year midpoints for labels
+month_starts <- c(0, month_ends[-12])
+month_mids <- month_starts + month_days / 2
+month_labels <- substr(month.abb, 1, 1)
+
+# 3. Build labels and breaks together
+breaks_x <- c(month_ends_position, month_mids)
+
+labels_x <- c(
+  rep("", length(month_ends_position)),
+  month_labels
+)
+
+tick_colors <- c(
+  rep("black", length(month_ends_position)),
+  rep(NA, length(month_labels))
+)
+```
+
+#### Generate the Plot
+
+Next, I generate the enhanced plot using these custom labels and dividers. 
+This version makes it easier to visually connect seasonal patterns to familiar 
+calendar months.
+
+```{r pl_months, fig.width = 5, fig.height = 4}
+
+d_tmp_sfc_months <-
+  d_tmp_sfc |>
+  ggplot(aes(dy, tmp_me)) +
+  geom_vline(
+    xintercept = month_ends_position,
+    color = "grey85",
+    linewidth = 1
+  ) +
+  geom_point(
+    shape = 21,
+    color = "dodgerblue3",
+    fill = "dodgerblue3",
+    size = 1.7,
+    alpha = 0.6
+  ) +
+  stat_smooth(
+    method = "gam",
+    formula = y ~ s(x, bs = "cc", k = 10),
+    method.args = list(knots = list(x = c(0.5, 365.5))),
+    color = "black",
+    alpha = 0.5
+  ) +
+  scale_x_continuous(
+    name = "",
+    breaks = breaks_x,
+    labels = labels_x,
+    limits = c(1, 365),
+    expand = c(0.001, 0.001)
+  ) +
+  scale_y_continuous(
+    name = expression(Temperature[Sfc] ~ (degree * C)),
+    expand = c(0.01, 0.01)
+  ) +
+  my_th +
+  theme(
+    axis.ticks.x = element_line(color = tick_colors, linewidth = 0.3),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+print(d_tmp_sfc_months)
+
+# Save the plot
+ggsave(
+  d_tmp_sfc_months,
+  file = paste("./figs/", "d_tmp_sfc_months", ".png", sep = ""),
+  units = "cm",
+  width = 16,
+  height = 14,
+  dpi = 350
+)
+```
+
+## Conclusions
+
+Replacing numeric day-of-year values with month-based labels in seasonal plots can 
+significantly improve readability and interpretation. This small adjustment helps 
+align visualizations with how people naturally perceive time, making patterns 
+easier to understand at a glance.
+
+While day of year remains useful for modeling and analysis, using month labels 
+for presentation purposes can enhance communication — especially in scientific papers, 
+reports, presentations, or public-facing outputs.
+
+This approach is easy to implement and can be adapted to other datasets to enhance 
+the clarity of seasonal data visualizations.
