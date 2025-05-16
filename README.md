@@ -11,4 +11,4 @@ I show how even a small change in labeling can make time-series patterns easier
 to interpret — especially for broader audiences. The approach compares the default DOY labeling 
 and an enhanced version with month separators and initials.
 
-![Fig. Comparison](https://github.com/ricardogonzalezgil/analysis-assign-positions-rep-elements-rgg/blob/main/docs/index_files/figure-html/methods_comparison_fig2-1.png)  
+![Fig. Comparison](https://github.com/ricardogonzalezgil/seasonal-plots-month-vs-doy-rgg/blob/main/docs/index_files/figure-html/Seasonality_x_labels_comparison.png)  
